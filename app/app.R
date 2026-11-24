@@ -47,7 +47,11 @@ reg_plot <- function(d, yvar, y_log, title, y_lab, res_fmt) {
   # Hunde aus ggdogs als Symbole (Fallback: normale Punkte)
   # (indirekt aufgerufen, damit shinylive ggdogs nicht als Abhaengigkeit sucht)
   dog_pkg <- "ggdogs"
-  dog_layers <- if (requireNamespace(dog_pkg, quietly = TRUE)) {
+  # isTRUE + tryCatch: in webR/shinylive liefert requireNamespace() fuer fehlende
+  # Pakete nicht immer TRUE/FALSE zurueck, was sonst "argument is of length zero" gibt
+  has_dogs <- isTRUE(tryCatch(suppressWarnings(requireNamespace(dog_pkg, quietly = TRUE)),
+                              error = function(e) FALSE))
+  dog_layers <- if (has_dogs) {
     geom_dog <- getExportedValue(dog_pkg, "geom_dog")
     list(geom_dog(data = filter(d, !hl), dog = "doge", size = 4),
          geom_dog(data = filter(d, hl),  dog = "pug",  size = 5.5))
@@ -191,6 +195,7 @@ server <- function(input, output, session) {
 
   # --- Regressionsplots -------------------------------------------------
   output$quotienten <- renderPlot({
+    req(input$team)
     reg_plot(current() |> mutate(hl = team == input$team),
              "satzquotient", y_log = TRUE,
              title = "Ballquotient vs. Satzquotient",
@@ -199,6 +204,7 @@ server <- function(input, output, session) {
   })
 
   output$punkte_bq <- renderPlot({
+    req(input$team)
     reg_plot(current() |> mutate(hl = team == input$team,
                                  punkte_pro_spiel = punkte / spiele),
              "punkte_pro_spiel", y_log = FALSE,
