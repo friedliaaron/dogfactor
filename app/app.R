@@ -26,10 +26,17 @@ result_cols <- c(
   "Niederlage 0:3 / 1:3" = "#C0392B"
 )
 
-theme_set(theme_minimal(base_size = 14) +
-            theme(panel.grid.minor = element_blank(),
-                  plot.title.position = "plot",
-                  legend.position = "top"))
+# Plot-Thema; auf schmalen Bildschirmen kleinere Schrift und Legende unten
+basis_thema <- function(mobil = FALSE) {
+  theme_minimal(base_size = if (mobil) 11 else 14) +
+    theme(panel.grid.minor = element_blank(),
+          plot.title.position = "plot",
+          legend.position = if (mobil) "bottom" else "top",
+          plot.subtitle = element_text(size = if (mobil) 8.5 else 11, colour = "grey30"))
+}
+theme_set(basis_thema())
+# DT: breite Tabellen seitlich scrollbar statt die Seite zu sprengen
+options(DT.options = list(scrollX = TRUE))
 
 # --- Regressionsplot mit Residuen -----------------------------------------
 # y_log = TRUE: Regression auf log10(y), Residuen als % relativ zur Erwartung.
@@ -93,6 +100,8 @@ js_quotient <- JS(
 
 seite_rangliste <- layout_sidebar(
   sidebar = sidebar(
+    # Handy: Auswahl immer sichtbar ueber dem Inhalt statt versteckt
+    open = list(desktop = "open", mobile = "always-above"),
     selectInput("rl_saison", "Saison", choices = NULL),
     selectInput("rl_gruppe", "Gruppe", choices = NULL),
     selectInput("datum", "Stand nach Spieltag", choices = NULL),
@@ -117,6 +126,7 @@ seite_rangliste <- layout_sidebar(
 seite_matchup <- layout_sidebar(
   sidebar = sidebar(
     width = 300,
+    open = list(desktop = "open", mobile = "always-above"),
     selectizeInput("mu_a", "Team A", choices = NULL),
     selectizeInput("mu_b", "Team B", choices = NULL),
     actionButton("mu_tausch", "A und B tauschen", class = "btn-sm btn-outline-secondary"),
@@ -307,9 +317,45 @@ seite_elo <- layout_sidebar(
   )
 )
 
+# --- Anpassungen fuer kleine Bildschirme (Handy) -----------------------------
+mobil_css <- "
+@media (max-width: 700px) {
+  /* Tab-Leisten: nicht umbrechen, sondern seitlich wischen */
+  .card-header .nav, .nav-underline, .nav-tabs {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; white-space: nowrap;
+    -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+  }
+  .card-header .nav .nav-link { padding: .35rem .55rem; font-size: .9rem; }
+  /* kompaktere Karten und Tabellen */
+  .card-body { padding: .5rem; }
+  .bslib-sidebar-layout > .main { padding: .5rem; }
+  table.dataTable, .dataTables_wrapper, .table { font-size: .78rem; }
+  table.dataTable td, table.dataTable th { padding: 4px 6px !important; }
+  .dataTables_wrapper .dataTables_filter input { width: 8em; }
+  .bslib-value-box .value-box-value { font-size: 1.5rem; }
+  .bslib-value-box .value-box-title { font-size: .85rem; }
+  .alert { font-size: .85rem; }
+  h5 { font-size: 1rem; } h6 { font-size: .9rem; }
+  .navbar-brand { font-size: 1rem; }
+}
+"
+# Fensterbreite an den Server melden (Plots passen Schrift und Legende daran an)
+mobil_js <- "
+$(document).on('shiny:connected', function() { Shiny.setInputValue('breite', window.innerWidth); });
+var breiteTimer;
+$(window).on('resize', function() {
+  clearTimeout(breiteTimer);
+  breiteTimer = setTimeout(function() { Shiny.setInputValue('breite', window.innerWidth); }, 300);
+});
+"
+
 ui <- page_navbar(
   title = "Swiss Volley 1. Liga Männer",
   theme = bs_theme(version = 5, primary = accent),
+  header = tags$head(
+    tags$meta(name = "viewport", content = "width=device-width, initial-scale=1"),
+    tags$style(HTML(mobil_css)),
+    tags$script(HTML(mobil_js))),
   nav_panel("Rangliste", seite_rangliste),
   nav_panel("Spiel-Explorer", seite_explorer),
   nav_panel("Elo-Rating", seite_elo),
@@ -317,6 +363,10 @@ ui <- page_navbar(
 )
 
 server <- function(input, output, session) {
+
+  # Schmaler Bildschirm (Handy)? Breite kommt per JS (mobil_js) als input$breite
+  mobil <- reactive(isTRUE(input$breite < 700))
+  thema_anwenden <- function() theme_set(basis_thema(mobil()))
 
   # === Rangliste (aus den Spieldaten, R/tabelle.R) ==========================
   # Offizielle Rangliste Gruppe B (scrape_ranking.R), nur noch zum Abgleich
@@ -407,6 +457,7 @@ server <- function(input, output, session) {
 
   # --- Punkte & Resultatprofil ------------------------------------------
   output$resultate <- renderPlot({
+    thema_anwenden()
     d <- current() |>
       mutate(team = factor(team, levels = rev(team))) |>
       select(team, punkte,
@@ -432,6 +483,7 @@ server <- function(input, output, session) {
 
   # --- Rangverlauf -------------------------------------------------------
   output$verlauf <- renderPlot({
+    thema_anwenden()
     h <- history()
     validate(need(length(unique(h$datum)) > 1,
                   "Der Verlauf erscheint ab dem zweiten Spieltag."))
@@ -453,6 +505,7 @@ server <- function(input, output, session) {
   })
 
   output$punkteverlauf <- renderPlot({
+    thema_anwenden()
     h <- history() |> mutate(hl = team == input$team)
     validate(need(length(unique(h$datum)) > 1, "Der Verlauf erscheint ab dem zweiten Spieltag."))
     last <- h |> filter(datum == max(datum))
@@ -514,6 +567,7 @@ server <- function(input, output, session) {
 
   # --- Regressionsplots -------------------------------------------------
   output$quotienten <- renderPlot({
+    thema_anwenden()
     req(input$team)
     reg_plot(current() |> mutate(hl = team == input$team),
              "satzquotient", y_log = TRUE,
@@ -523,6 +577,7 @@ server <- function(input, output, session) {
   })
 
   output$punkte_bq <- renderPlot({
+    thema_anwenden()
     req(input$team)
     reg_plot(current() |> mutate(hl = team == input$team,
                                  punkte_pro_spiel = punkte / spiele),
@@ -598,12 +653,12 @@ server <- function(input, output, session) {
     }
     tagList(
       tags$h5(sprintf("%s gegen %s", id$na, id$nb)),
-      tags$table(class = "table table-sm",
+      div(class = "table-responsive", tags$table(class = "table table-sm",
         tags$thead(tags$tr(tags$th(""), tags$th("Spiele"), tags$th("Siege A : B"), tags$th("Sätze"),
                            tags$th("Bälle (Anteil A)"), tags$th("Punkte"))),
         tags$tbody(zeile(d, "Total"),
                    zeile(filter(d, a_heim), sprintf("bei %s", id$na)),
-                   zeile(filter(d, !a_heim), sprintf("bei %s", id$nb)))))
+                   zeile(filter(d, !a_heim), sprintf("bei %s", id$nb))))))
   })
 
   output$mu_naechstes <- renderUI({
@@ -624,6 +679,7 @@ server <- function(input, output, session) {
   })
 
   output$mu_plot <- renderPlot({
+    thema_anwenden()
     id <- mu_ids(); d <- mu_duelle()
     req(!is.null(d))
     d <- d |> mutate(anteil = ba / (ba + bb), ort = ifelse(a_heim, paste("bei", id$na), paste("bei", id$nb)))
@@ -686,6 +742,7 @@ server <- function(input, output, session) {
   })
 
   output$mu_gg_plot <- renderPlot({
+    thema_anwenden()
     id <- mu_ids(); g <- mu_gg()
     req(nrow(g) > 0)
     g <- g |> mutate(lbl = paste0(gegner, " (", saison_label(saison), ")"),
@@ -718,6 +775,7 @@ server <- function(input, output, session) {
   })
 
   output$mu_elo <- renderPlot({
+    thema_anwenden()
     id <- mu_ids()
     v <- elo()$verlauf |> filter(team_id %in% c(id$a, id$b), saison %in% mu_saisons()) |>
       mutate(team = ifelse(team_id == id$a, id$na, id$nb))
@@ -974,6 +1032,7 @@ server <- function(input, output, session) {
   })
 
   output$elo_verlauf <- renderPlot({
+    thema_anwenden()
     t <- elo_gruppe_tab()
     req(nrow(t) > 0)
     sz <- as.integer(input$elo_saison)
@@ -1075,6 +1134,7 @@ server <- function(input, output, session) {
   })
 
   output$elo_guete_kalib <- renderPlot({
+    thema_anwenden()
     d <- elo_guete_daten()
     req(nrow(d) > 0)
     k <- d |>
@@ -1095,6 +1155,7 @@ server <- function(input, output, session) {
   })
 
   output$elo_guete_verlauf <- renderPlot({
+    thema_anwenden()
     d <- elo_guete_daten() |> arrange(datum, game_id)
     req(nrow(d) > 0)
     kum <- d |>
@@ -1196,6 +1257,7 @@ server <- function(input, output, session) {
   })
 
   output$elo_erkl_plot <- renderPlot({
+    thema_anwenden()
     t <- elo_erkl_teams()
     neutral <- isTRUE(input$elo_neutral)
     kurve <- tibble(b = seq(0.38, 0.62, by = 0.002)) |>
