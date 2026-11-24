@@ -6,3 +6,4 @@ site/
 # lokal: Analysen (Berichte, externe Daten) und Logs nicht veroeffentlichen
 analysen/
 logs/
+CLAUDE.md

@@ -1,56 +1,57 @@
-# Rangliste 1L Männer, Gruppe B (Swiss Volley)
+# Volleyball 1. Liga Männer: Ranglisten, Elo und Matchups
 
-Shiny-App mit der Rangliste aus dem Swiss Volley Game Center. Sie läuft über shinylive
-im Browser und wird auf GitHub Pages veröffentlicht. Die Daten werden täglich per
-GitHub Action abgerufen.
+> **Hinweis:** Dies ist ein privates Freizeitprojekt, entstanden als Übung im Programmieren
+> und in der Datenanalyse mit R. Es ist weder Forschung noch ein kommerzielles Angebot und
+> verfolgt keinerlei kommerzielle Interessen. Es besteht keine Verbindung zu Swiss Volley,
+> zu Vereinen oder zu anderen Organisationen.
+>
+> Die Inhalte erheben keinen Anspruch auf Richtigkeit, Vollständigkeit oder Aktualität;
+> es wird keine Gewähr übernommen. Elo-Ratings und Siegwahrscheinlichkeiten sind
+> Spielerei und nicht als Grundlage für Entscheidungen oder Wetten gedacht.
+> Massgebend sind ausschliesslich die offiziellen Angaben von Swiss Volley.
+>
+> Die Spieldaten stammen aus dem öffentlich zugänglichen Swiss Volley Game Center
+> (volleyball.ch); alle Rechte daran liegen bei den jeweiligen Rechteinhabern.
+> Wer mit der Darstellung nicht einverstanden ist oder etwas entfernt haben möchte,
+> kann gerne ein Issue in diesem Repository eröffnen.
+
+Shiny-App zu den Spielen der 1. Liga Männer (alle Gruppen, ab Saison 2022/23). Sie läuft
+über shinylive direkt im Browser und wird auf GitHub Pages veröffentlicht.
+
+**Seiten der App**
+
+- **Rangliste:** Tabelle jeder Gruppe und Saison zu jedem Spieltag, Rang- und Punkteverlauf,
+  Resultatprofil, Satz- und Ballquotient, Restprogramm
+- **Spiel-Explorer:** alle Spiele mit Filtern (Saison, Team, Heim/Auswärts, Resultat, Ballquotient usw.)
+- **Elo-Rating:** Ratings, Verlauf, Prognosen für offene Spiele, Prognosegüte und eine Erklärung der Berechnung
+- **Matchup:** Direktvergleich zweier Teams und Vergleich über gemeinsame Gegner
 
 ```
 ├── app/
-│   ├── app.R                      Shiny-App
-│   └── data/ranking_history.csv   Verlauf (ein Snapshot pro Tag)
-├── scrape_ranking.R               holt die Rangliste, hängt Tages-Snapshot an
+│   ├── app.R                  Shiny-App
+│   ├── R/                     Hilfsfunktionen (Aufbereitung, Rangliste, Elo), von Shiny automatisch geladen
+│   └── data/games.csv         Spiel-Datenbank (eine Zeile pro Spiel)
+├── scrape_games.R             holt Spielplan und Resultate aus dem Game Center
 └── .github/workflows/
-    ├── scrape.yml                 täglich 04:17 UTC: Scraper laufen lassen, CSV committen
-    └── deploy.yml                 bei jedem Push auf main (und nach dem Scraper): App auf Pages
+    ├── scrape.yml             jeden Montag 05:00 UTC: Spiele aktualisieren, CSV committen
+    └── deploy.yml             nach jedem Push und jedem Scrape: App auf GitHub Pages
 ```
-
-## Einrichten (einmalig)
-
-1. Auf GitHub ein neues Repository anlegen (öffentlich, denn GitHub Pages ist bei privaten Repos nur mit bezahltem Plan verfügbar).
-2. Lokal im Ordner:
-   ```bash
-   git init -b main
-   git add .
-   git commit -m "Erste Version"
-   git remote add origin https://github.com/<user>/<repo>.git
-   git push -u origin main
-   ```
-3. Auf GitHub: **Settings › Pages › Build and deployment › Source: "GitHub Actions"**.
-4. **Actions › App auf GitHub Pages veroeffentlichen › Run workflow** (oder einfach nochmals pushen).
-   Die App ist danach unter `https://<user>.github.io/<repo>/` erreichbar.
-5. Optional den Scraper einmal von Hand testen: **Actions › Rangliste abrufen › Run workflow**.
 
 ## Arbeitsablauf
 
-Änderungen an `app/app.R` committen und pushen, dann wird die App automatisch neu veröffentlicht (dauert ein paar Minuten).
+Änderungen committen und pushen, dann wird die App automatisch neu veröffentlicht
+(dauert ein paar Minuten). Weil der Bot jeden Montag einen Commit mit neuen Daten macht,
+**vor dem Pushen immer zuerst `git pull`**.
 
-Weil der Bot täglich einen Commit mit neuen Daten macht, **vor dem Pushen immer zuerst `git pull`**
-(sonst wird der Push abgelehnt).
+Den Scraper von Hand starten: **Actions › Spiele aktualisieren › Run workflow**.
 
 ## Lokal ausführen
 
 ```r
-install.packages(c("shiny", "bslib", "DT", "ggplot2", "dplyr", "tidyr", "ggrepel",
-                   "rvest", "chromote", "readr", "stringr"))
+install.packages(c("shiny", "bslib", "DT", "ggplot2", "dplyr", "tidyr", "ggrepel", "readr",
+                   "rvest", "chromote", "xml2", "stringr", "purrr"))
 # im Repo-Root:
-source("scrape_ranking.R")   # braucht Google Chrome
+#   Rscript scrape_games.R daily      # laufende Saison aktualisieren (braucht Google Chrome)
+#   Rscript scrape_games.R backfill   # alle Saisons neu einlesen (dauert rund eine Stunde)
 shiny::runApp("app")
 ```
-
-Hunde-Symbole: `remotes::install_github("R-CoderDotCom/ggdogs")`. Lokal zeigt die App dann Hunde.
-In der GitHub-Pages-Version (webR) ist ggdogs nicht verfügbar, dort erscheinen normale Punkte.
-
-## Andere Gruppe
-
-In `scrape_ranking.R` die `url` (Parameter `i_league`, `i_phase`, `i_group`) und `group_label` anpassen,
-im `app/app.R` den Titel.
