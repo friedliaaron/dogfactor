@@ -146,8 +146,8 @@ seite_matchup <- layout_sidebar(
     selectizeInput("mu_a", "Team A", choices = NULL),
     selectizeInput("mu_b", "Team B", choices = NULL),
     actionButton("mu_tausch", "A und B tauschen", class = "btn-sm btn-outline-secondary"),
-    selectizeInput("mu_saison", "Saisons", choices = NULL, multiple = TRUE,
-                   options = list(placeholder = "alle")),
+    selectizeInput("mu_saison", "Saisons (leer = alle)", choices = NULL, multiple = TRUE,
+                   options = list(placeholder = "alle", plugins = list("remove_button"))),
     tags$small(class = "text-muted",
                "Direktvergleich: alle Spiele A gegen B (alle Phasen). Gemeinsame Gegner: Teams,",
                "gegen die A und B in derselben Saison gespielt haben.")
@@ -160,7 +160,6 @@ seite_matchup <- layout_sidebar(
               DTOutput("mu_duelle")),
     nav_panel("Gemeinsame Gegner",
               uiOutput("mu_gg_text"),
-              plotOutput("mu_gg_plot", height = "420px", fill = FALSE),
               DTOutput("mu_gg_tab")),
     nav_panel("Elo-Verlauf", plotOutput("mu_elo", height = "480px"))
   )
@@ -619,8 +618,10 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "mu_b", choices = ch,
                          selected = if (isTRUE(alt_b %in% ch)) alt_b else ch[2])
     s <- sort(unique(games_roh()$saison), decreasing = TRUE)
+    alt <- isolate(input$mu_saison)
+    # Vorauswahl: laufende Saison (leer lassen = alle Saisons)
     updateSelectizeInput(session, "mu_saison", choices = setNames(s, saison_label(s)),
-                         selected = isolate(input$mu_saison))
+                         selected = if (length(alt)) alt else s[1])
   })
   observeEvent(input$mu_tausch, {
     a <- input$mu_a; b <- input$mu_b
@@ -761,25 +762,6 @@ server <- function(input, output, session) {
         tags$strong(sprintf("Differenz: %+.2f Punkte pro Spiel, %+.1f Prozentpunkte Ballanteil zugunsten von %s.",
                             diff_p, 100 * abs(diff_b), besser)),
         " Jeder Gegner zählt gleich viel.")
-  })
-
-  output$mu_gg_plot <- renderPlot({
-    thema_anwenden()
-    id <- mu_ids(); g <- mu_gg()
-    req(nrow(g) > 0)
-    g <- g |> mutate(lbl = paste0(gegner, " (", saison_label(saison), ")"),
-                     lbl = factor(lbl, levels = lbl[order(ball_a - ball_b)]))
-    lang <- bind_rows(transmute(g, lbl, team = id$na, ball = ball_a),
-                      transmute(g, lbl, team = id$nb, ball = ball_b))
-    ggplot(lang, aes(ball, lbl)) +
-      geom_vline(xintercept = 0.5, colour = "grey80") +
-      geom_line(aes(group = lbl), colour = "grey80", linewidth = 1.2) +
-      geom_point(aes(fill = team), shape = 21, size = 4.5, colour = "white", stroke = 1) +
-      scale_fill_manual(values = setNames(c(accent, "grey30"), c(id$na, id$nb)), name = NULL) +
-      scale_x_continuous(labels = function(x) paste0(round(100 * x), "%")) +
-      labs(title = "Ballanteil gegen gemeinsame Gegner",
-           subtitle = "Sortiert nach Differenz; oben: grösster Vorteil für Team A",
-           x = "Ballanteil gegen diesen Gegner", y = NULL)
   })
 
   output$mu_gg_tab <- renderDT({
