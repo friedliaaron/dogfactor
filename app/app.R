@@ -40,12 +40,13 @@ theme_set(basis_thema())
 # in dieser Reihenfolge getestet). Mehr als 8 Teams: Farben wiederholt, aber gestrichelt.
 # Die Farbe haengt am Team (alphabetisch), nicht am Rang, damit sie stabil bleibt.
 team_pal <- c("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
-team_skalen <- function(teams, hl_team = NULL) {
+team_skalen <- function(teams, hl_team = NULL, legende = FALSE) {
   teams <- sort(unique(teams)); i <- seq_along(teams)
   farbe <- setNames(team_pal[(i - 1) %% length(team_pal) + 1], teams)
   linie <- setNames(ifelse(i > length(team_pal), "22", "solid"), teams)
-  list(scale_colour_manual(values = farbe, guide = "none"),
-       scale_linetype_manual(values = linie, guide = "none"),
+  g <- if (legende) "legend" else "none"   # Farbe und Linientyp teilen sich eine Legende
+  list(scale_colour_manual(values = farbe, guide = g, name = NULL),
+       scale_linetype_manual(values = linie, guide = g, name = NULL),
        # hervorgehobenes Team dicker, die anderen etwas zurueckgenommen
        scale_linewidth_manual(values = c(`FALSE` = 0.8, `TRUE` = 2), guide = "none"),
        scale_alpha_manual(values = c(`FALSE` = if (is.null(hl_team)) 1 else 0.75, `TRUE` = 1), guide = "none"))
@@ -293,7 +294,6 @@ seite_elo <- layout_sidebar(
     selectInput("elo_saison", "Saison", choices = NULL),
     selectInput("elo_gruppe", "Gruppe", choices = NULL),
     selectInput("elo_team", "Team hervorheben", choices = NULL),
-    checkboxInput("elo_alle", "Verlauf über alle Saisons", FALSE),
     hr(),
     tags$strong("Matchup-Rechner"),
     selectizeInput("elo_heim", "Heimteam", choices = NULL),
@@ -308,6 +308,11 @@ seite_elo <- layout_sidebar(
   navset_card_underline(
     nav_panel("Tabelle", DTOutput("elo_tabelle")),
     nav_panel("Verlauf", plotOutput("elo_verlauf", height = "540px")),
+    nav_panel("Alle Saisons",
+              selectizeInput("elo_lang_teams", "Teams (Vorauswahl: gewählte Gruppe)", choices = NULL,
+                             multiple = TRUE, width = "100%",
+                             options = list(placeholder = "Teams wählen", plugins = list("remove_button"))),
+              plotOutput("elo_lang", height = "580px", fill = FALSE)),
     nav_panel("Nächste Spiele",
               checkboxInput("elo_prog_alle", "Alle Gruppen", FALSE),
               DTOutput("elo_prognosen")),
@@ -1053,8 +1058,7 @@ server <- function(input, output, session) {
     t <- elo_gruppe_tab()
     req(nrow(t) > 0)
     sz <- as.integer(input$elo_saison)
-    v <- elo()$verlauf |> filter(team_id %in% t$team_id)
-    if (!isTRUE(input$elo_alle)) v <- filter(v, saison == sz)
+    v <- elo()$verlauf |> filter(team_id %in% t$team_id, saison == sz)
     # Startpunkt jeder Saison (Rating vor dem ersten Spiel) plus Rating nach jedem Spiel
     pkt <- bind_rows(
       v |> group_by(team_id, team, saison) |> slice(1) |> ungroup() |>
@@ -1074,8 +1078,53 @@ server <- function(input, output, session) {
       team_skalen(pkt$team, input$elo_team) +
       scale_x_date(expand = expansion(mult = c(0.02, 0.25))) +
       labs(title = sprintf("Elo-Verlauf %s", input$elo_gruppe),
-           subtitle = if (isTRUE(input$elo_alle)) "Alle Saisons; Sprünge beim Saisonwechsel = Rückführung Richtung 1500"
-                      else saison_label(sz),
+           subtitle = paste(saison_label(sz), "(alle Saisons: Tab \"Alle Saisons\")"),
+           x = NULL, y = "Elo")
+  })
+
+  # --- Langzeitverlauf ueber alle Saisons ------------------------------------
+  observe({
+    namen <- aktuelle_namen(games_roh())
+    ch <- setNames(namen$id, namen$name)[order(namen$name)]
+    updateSelectizeInput(session, "elo_lang_teams", choices = ch,
+                         selected = isolate(input$elo_lang_teams))
+  })
+  # Vorauswahl: Teams der gewaehlten Gruppe und Saison
+  observeEvent(elo_gruppe_tab(), {
+    updateSelectizeInput(session, "elo_lang_teams", selected = as.character(elo_gruppe_tab()$team_id))
+  })
+
+  output$elo_lang <- renderPlot({
+    thema_anwenden()
+    ids <- suppressWarnings(as.integer(input$elo_lang_teams))
+    validate(need(length(ids) > 0, "Bitte mindestens ein Team wählen."))
+    v <- elo()$verlauf |> filter(team_id %in% ids)
+    validate(need(nrow(v) > 0, "Für diese Teams gibt es keine Spiele."))
+    pkt <- bind_rows(
+      v |> group_by(team_id, team, saison) |> slice(1) |> ungroup() |>
+        transmute(team_id, team, saison, datum = datum - 1, r = r_vor),
+      v |> transmute(team_id, team, saison, datum, r = r_nach)) |>
+      arrange(datum) |>
+      mutate(hl = coalesce(team_id == suppressWarnings(as.integer(input$elo_team)), FALSE),
+             saison_lbl = saison_label(saison))
+    leg <- guide_legend(nrow = if (mobil()) 6 else 3, byrow = TRUE,
+                        override.aes = list(linewidth = 1.2))
+    letzte <- pkt |> group_by(team_id) |> slice_max(datum, n = 1, with_ties = FALSE) |> ungroup()
+    ggplot(pkt, aes(datum, r, group = interaction(team_id, saison), colour = team, linetype = team)) +
+      geom_hline(yintercept = 1500, colour = "grey85") +
+      geom_step(aes(linewidth = hl, alpha = hl)) +
+      geom_point(data = letzte, size = 2.5) +
+      # Saisons nebeneinander ohne Sommerpause; der Sprung zwischen den Feldern ist die
+      # Rueckfuehrung Richtung 1500 beim Saisonwechsel
+      facet_grid(~ saison_lbl, scales = "free_x", space = "free_x") +
+      team_skalen(pkt$team, input$elo_team, legende = TRUE) +
+      scale_x_date(date_breaks = "2 months", date_labels = "%m") +
+      guides(colour = leg, linetype = leg) +   # gleiche Einstellungen: eine gemeinsame Legende
+      theme(legend.position = "bottom", panel.spacing.x = unit(0.4, "lines"),
+            strip.text = element_text(face = "bold"),
+            panel.border = element_rect(colour = "grey90", fill = NA)) +
+      labs(title = "Elo-Verlauf über alle Saisons",
+           subtitle = "Ein Feld pro Saison (Monate unten); Punkt = letztes Spiel des Teams",
            x = NULL, y = "Elo")
   })
 
