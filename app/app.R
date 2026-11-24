@@ -358,6 +358,47 @@ mobil_css <- "
   .navbar-brand { font-size: 1rem; }
 }
 "
+# Banner: Bild als Hintergrund der Navigationsleiste (keine zusaetzliche Hoehe, nichts verschiebt sich)
+banner_css <- "
+.navbar {
+  background-image: linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)), url('big_dawg.jpg') !important;
+  background-size: cover !important;
+  background-position: center 55% !important;
+}
+.navbar .navbar-brand, .navbar .nav-link { color: #fff !important; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+.navbar .nav-link.active { border-bottom: 2px solid #fff; }
+#sound_knopf { font-size: 1.15rem; line-height: 1; cursor: pointer; }
+"
+
+# Bellen beim Oeffnen: Browser erlauben Ton erst nach einer Interaktion. Darum zuerst
+# versuchen, sonst beim ersten Klick/Tipp abspielen. Stummschaltung merkt sich der Browser.
+sound_js <- "
+(function() {
+  var bellen = new Audio('bark.mp3'); bellen.volume = 0.6;
+  var KEY = 'volley_sound_stumm', erledigt = false;
+  function stumm() { try { return localStorage.getItem(KEY) === '1'; } catch (e) { return false; } }
+  function setzeStumm(s) { try { localStorage.setItem(KEY, s ? '1' : '0'); } catch (e) {} }
+  function knopf() { $('#sound_knopf').text(stumm() ? '\U0001F507' : '\U0001F50A'); }
+  function abspielen() { bellen.currentTime = 0; return bellen.play(); }
+  function ersterTipp() {
+    document.removeEventListener('pointerdown', ersterTipp, true);
+    if (!erledigt && !stumm()) { erledigt = true; abspielen().catch(function() {}); }
+  }
+  $(function() {
+    knopf();
+    if (!stumm()) {
+      abspielen().then(function() { erledigt = true; })
+                 .catch(function() { document.addEventListener('pointerdown', ersterTipp, true); });
+    }
+  });
+  $(document).on('click', '#sound_knopf', function(e) {
+    e.preventDefault();
+    var s = !stumm(); setzeStumm(s); knopf();
+    if (s) { bellen.pause(); } else { erledigt = true; abspielen().catch(function() {}); }
+  });
+})();
+"
+
 # Fensterbreite an den Server melden (Plots passen Schrift und Legende daran an)
 mobil_js <- "
 $(document).on('shiny:connected', function() { Shiny.setInputValue('breite', window.innerWidth); });
@@ -374,11 +415,17 @@ ui <- page_navbar(
   header = tags$head(
     tags$meta(name = "viewport", content = "width=device-width, initial-scale=1"),
     tags$style(HTML(mobil_css)),
-    tags$script(HTML(mobil_js))),
+    tags$style(HTML(banner_css)),
+    tags$script(HTML(mobil_js)),
+    tags$script(HTML(sound_js))),
+  navbar_options = navbar_options(theme = "dark"),
   nav_panel("Rangliste", seite_rangliste),
   nav_panel("Spiel-Explorer", seite_explorer),
   nav_panel("Elo-Rating", seite_elo),
-  nav_panel("Matchup", seite_matchup)
+  nav_panel("Matchup", seite_matchup),
+  nav_spacer(),
+  nav_item(tags$a(id = "sound_knopf", class = "nav-link", href = "#", title = "Ton an/aus",
+                  `aria-label` = "Ton an oder aus", "\U0001F50A"))
 )
 
 server <- function(input, output, session) {
