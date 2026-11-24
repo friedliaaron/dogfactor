@@ -1,0 +1,61 @@
+name: App auf GitHub Pages veroeffentlichen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # Pushes des Scraper-Bots loesen keinen push-Trigger aus, darum zusaetzlich:
+  workflow_run:
+    workflows: ["Rangliste abrufen"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main   # bei workflow_run den neuesten Stand inkl. Bot-Commit holen
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::shinylive
+            any::shiny
+            any::bslib
+            any::DT
+            any::ggplot2
+            any::dplyr
+            any::tidyr
+            any::ggrepel
+
+      - name: App mit shinylive exportieren
+        run: Rscript -e 'shinylive::export("app", "site")'
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
