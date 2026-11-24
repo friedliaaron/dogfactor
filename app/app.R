@@ -35,6 +35,21 @@ basis_thema <- function(mobil = FALSE) {
           plot.subtitle = element_text(size = if (mobil) 8.5 else 11, colour = "grey30"))
 }
 theme_set(basis_thema())
+
+# Teamfarben fuer Verlaufsgrafiken: 8 gut unterscheidbare Farben (auch bei Farbschwaeche
+# in dieser Reihenfolge getestet). Mehr als 8 Teams: Farben wiederholt, aber gestrichelt.
+# Die Farbe haengt am Team (alphabetisch), nicht am Rang, damit sie stabil bleibt.
+team_pal <- c("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
+team_skalen <- function(teams, hl_team = NULL) {
+  teams <- sort(unique(teams)); i <- seq_along(teams)
+  farbe <- setNames(team_pal[(i - 1) %% length(team_pal) + 1], teams)
+  linie <- setNames(ifelse(i > length(team_pal), "22", "solid"), teams)
+  list(scale_colour_manual(values = farbe, guide = "none"),
+       scale_linetype_manual(values = linie, guide = "none"),
+       # hervorgehobenes Team dicker, die anderen etwas zurueckgenommen
+       scale_linewidth_manual(values = c(`FALSE` = 0.8, `TRUE` = 2), guide = "none"),
+       scale_alpha_manual(values = c(`FALSE` = if (is.null(hl_team)) 1 else 0.75, `TRUE` = 1), guide = "none"))
+}
 # DT: breite Tabellen seitlich scrollbar statt die Seite zu sprengen
 options(DT.options = list(scrollX = TRUE))
 
@@ -490,14 +505,15 @@ server <- function(input, output, session) {
     h <- h |> mutate(hl = team == input$team)
     last <- h |> filter(datum == max(datum))
 
-    ggplot(h, aes(datum, rang, group = team)) +
+    ggplot(h, aes(datum, rang, group = team, colour = team, linetype = team)) +
       geom_vline(xintercept = as.Date(input$datum), colour = "grey85", linetype = "dashed") +
-      geom_line(data = filter(h, !hl), colour = grey, linewidth = 0.8) +
-      geom_line(data = filter(h, hl), colour = accent, linewidth = 1.6) +
-      geom_point(data = filter(h, hl), colour = accent, size = 2.5) +
-      geom_text(data = last, aes(label = team, colour = hl),
-                hjust = -0.08, size = 3.8, show.legend = FALSE) +
-      scale_colour_manual(values = c(`FALSE` = "grey40", `TRUE` = accent)) +
+      geom_line(aes(linewidth = hl, alpha = hl)) +
+      geom_point(data = filter(h, hl), size = 2.5) +
+      geom_point(data = last, size = 3) +
+      geom_text(data = last, aes(label = team), colour = "grey15",
+                fontface = ifelse(last$hl, "bold", "plain"),
+                hjust = -0.12, size = if (mobil()) 3 else 3.8) +
+      team_skalen(h$team, input$team) +
       scale_y_reverse(breaks = 1:max(h$rang)) +
       scale_x_date(expand = expansion(mult = c(0.02, 0.3))) +
       labs(title = sprintf("Rang über die Zeit, %s %s", input$rl_gruppe, saison_label(as.integer(input$rl_saison))),
@@ -509,14 +525,15 @@ server <- function(input, output, session) {
     h <- history() |> mutate(hl = team == input$team)
     validate(need(length(unique(h$datum)) > 1, "Der Verlauf erscheint ab dem zweiten Spieltag."))
     last <- h |> filter(datum == max(datum))
-    ggplot(h, aes(datum, punkte, group = team)) +
+    ggplot(h, aes(datum, punkte, group = team, colour = team, linetype = team)) +
       geom_vline(xintercept = as.Date(input$datum), colour = "grey85", linetype = "dashed") +
-      geom_step(data = filter(h, !hl), colour = grey, linewidth = 0.8) +
-      geom_step(data = filter(h, hl), colour = accent, linewidth = 1.6) +
-      geom_text_repel(data = last, aes(label = paste0(team, " (", punkte, ")"), colour = hl),
-                      direction = "y", hjust = 0, nudge_x = 3, size = 3.6, segment.colour = "grey85",
-                      show.legend = FALSE, seed = 1) +
-      scale_colour_manual(values = c(`FALSE` = "grey40", `TRUE` = accent)) +
+      geom_step(aes(linewidth = hl, alpha = hl)) +
+      geom_point(data = last, size = 3) +
+      geom_text_repel(data = last, aes(label = paste0(team, " (", punkte, ")")), colour = "grey15",
+                      fontface = ifelse(last$hl, "bold", "plain"),
+                      direction = "y", hjust = 0, nudge_x = 3, size = if (mobil()) 3 else 3.6,
+                      segment.colour = "grey85", seed = 1) +
+      team_skalen(h$team, input$team) +
       scale_x_date(expand = expansion(mult = c(0.02, 0.3))) +
       labs(title = sprintf("Punkte über die Zeit, %s %s", input$rl_gruppe, saison_label(as.integer(input$rl_saison))),
            subtitle = "Kumulierte Meisterschaftspunkte nach jedem Spieltag", x = NULL, y = "Punkte")
@@ -1046,14 +1063,15 @@ server <- function(input, output, session) {
       arrange(datum) |>
       mutate(hl = team_id == as.integer(input$elo_team))
     last <- pkt |> group_by(team_id) |> slice_max(datum, n = 1, with_ties = FALSE) |> ungroup()
-    ggplot(pkt, aes(datum, r, group = interaction(team_id, saison))) +
+    ggplot(pkt, aes(datum, r, group = interaction(team_id, saison), colour = team, linetype = team)) +
       geom_hline(yintercept = 1500, colour = "grey85") +
-      geom_step(data = filter(pkt, !hl), colour = grey, linewidth = 0.7) +
-      geom_step(data = filter(pkt, hl), colour = accent, linewidth = 1.4) +
-      geom_text_repel(data = last, aes(label = team, colour = hl), direction = "y",
-                      hjust = 0, nudge_x = 5, size = 3.6, segment.colour = "grey80",
-                      show.legend = FALSE, seed = 1) +
-      scale_colour_manual(values = c(`FALSE` = "grey40", `TRUE` = accent)) +
+      geom_step(aes(linewidth = hl, alpha = hl)) +
+      geom_point(data = last, size = 3) +
+      geom_text_repel(data = last, aes(label = team), colour = "grey15",
+                      fontface = ifelse(last$hl, "bold", "plain"), direction = "y",
+                      hjust = 0, nudge_x = 5, size = if (mobil()) 3 else 3.6, segment.colour = "grey80",
+                      seed = 1) +
+      team_skalen(pkt$team, input$elo_team) +
       scale_x_date(expand = expansion(mult = c(0.02, 0.25))) +
       labs(title = sprintf("Elo-Verlauf %s", input$elo_gruppe),
            subtitle = if (isTRUE(input$elo_alle)) "Alle Saisons; Sprünge beim Saisonwechsel = Rückführung Richtung 1500"
