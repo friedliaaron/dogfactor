@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   # Pushes des Scraper-Bots loesen keinen push-Trigger aus, darum zusaetzlich:
   workflow_run:
-    workflows: ["Rangliste abrufen"]
+    workflows: ["Spiele aktualisieren"]
     types: [completed]
 
 permissions:
@@ -42,6 +42,8 @@ jobs:
             any::dplyr
             any::tidyr
             any::ggrepel
+            any::readr
+            any::tibble
 
       - name: App mit shinylive exportieren
         run: Rscript -e 'shinylive::export("app", "site")'

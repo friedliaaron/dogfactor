@@ -2,3 +2,7 @@
 .RData
 .Rproj.user/
 site/
+
+# lokal: Analysen (Berichte, externe Daten) und Logs nicht veroeffentlichen
+analysen/
+logs/
