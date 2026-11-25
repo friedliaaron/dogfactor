@@ -77,9 +77,11 @@ team_sicht <- function(games) {
                                         tiebreak ~ 1L, TRUE ~ 0L),
       satzdiff       = saetze_fuer - saetze_gegen,
       ballpunktdiff  = baelle_fuer - baelle_gegen,
-      # BQ pro Spiel; NA wenn keine Ballpunkte vorliegen (z. B. Forfait)
-      bq             = ifelse(is.na(baelle_gegen) | baelle_gegen == 0, NA_real_,
-                              baelle_fuer / baelle_gegen),
+      # Forfait: ein Team ohne einen einzigen Ballpunkt (z. B. 3 x 25:0); zaehlt in der
+      # Tabelle, ist aber kein gespieltes Spiel und verzerrt Ball-Kennzahlen
+      forfait        = !is.na(baelle_fuer) & (baelle_fuer == 0 | baelle_gegen == 0),
+      # BQ pro Spiel; NA bei Forfait oder fehlenden Ballpunkten
+      bq             = ifelse(is.na(baelle_gegen) | forfait, NA_real_, baelle_fuer / baelle_gegen),
       satz1_gewonnen = s1_fuer > s1_gegen
     ) |>
     dplyr::arrange(dplyr::desc(datum), game_id, dplyr::desc(heim_ausw == "Heim"))

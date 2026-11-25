@@ -169,7 +169,8 @@ seite_explorer <- layout_sidebar(
   sidebar = sidebar(
     width = 320,
     radioButtons("ex_ansicht", "Ansicht",
-                 c("Spiele" = "spiele", "Teams pro Saison" = "saison",
+                 c("Spiele" = "spiele", "Sätze (eine Zeile pro Satz)" = "saetze",
+                   "Teams pro Saison" = "saison",
                    "Teams über alle gewählten Saisons" = "gesamt")),
     selectizeInput("ex_saison", "Saison", choices = NULL, multiple = TRUE,
                    options = list(placeholder = "alle")),
@@ -186,6 +187,7 @@ seite_explorer <- layout_sidebar(
     checkboxGroupInput("ex_resultat", "Resultat (aus Teamsicht)", resultat_stufen,
                        selected = resultat_stufen, inline = TRUE),
     radioButtons("ex_satz1", "1. Satz", c("alle", "gewonnen", "verloren"), inline = TRUE),
+    checkboxInput("ex_forfait", "Forfait-Spiele einbeziehen (z. B. 3 × 25:0)", FALSE),
     dateRangeInput("ex_datum", "Zeitraum", start = NULL, end = NULL,
                    format = "dd.mm.yyyy", language = "de", separator = "bis"),
     sliderInput("ex_bq", "Ballquotient im Spiel", min = 0, max = 3, value = c(0, 3), step = 0.05),
@@ -194,8 +196,9 @@ seite_explorer <- layout_sidebar(
     actionButton("ex_reset", "Filter zurücksetzen", class = "btn-sm btn-outline-secondary"),
     downloadButton("ex_download", "Tabelle als CSV", class = "btn-sm"),
     tags$small(class = "text-muted",
-               "Jedes Spiel erscheint zweimal (Sicht beider Teams). Für eine Zeile pro Spiel",
-               "nur \"Heim\" wählen. Die Filter wirken auf die Spiele, die Teamansichten",
+               "Jedes Spiel (und jeder Satz) erscheint zweimal (Sicht beider Teams). Für eine Zeile",
+               "pro Spiel nur \"Heim\" wählen. Forfait-Spiele sind standardmässig ausgeblendet,",
+               "weil sie Ball-Kennzahlen verzerren. Die Filter wirken auf die Spiele, die Teamansichten",
                "zählen die gefilterten Spiele zusammen (z. B. nur Heimspiele = Heimtabelle).",
                "Teamnamen: jeweils neuster Name.")
   ),
@@ -867,6 +870,7 @@ server <- function(input, output, session) {
     updateCheckboxGroupInput(session, "ex_ort", selected = c("Heim", "Auswärts"))
     updateCheckboxGroupInput(session, "ex_resultat", selected = resultat_stufen)
     updateRadioButtons(session, "ex_satz1", selected = "alle")
+    updateCheckboxInput(session, "ex_forfait", value = FALSE)
     d_rng <- range(s$datum, na.rm = TRUE)
     updateDateRangeInput(session, "ex_datum", start = d_rng[1], end = d_rng[2],
                          min = d_rng[1], max = d_rng[2])
@@ -890,6 +894,7 @@ server <- function(input, output, session) {
     s <- filter(s, heim_ausw %in% input$ex_ort, resultat %in% input$ex_resultat)
     if (input$ex_satz1 == "gewonnen") s <- filter(s, satz1_gewonnen %in% TRUE)
     if (input$ex_satz1 == "verloren") s <- filter(s, satz1_gewonnen %in% FALSE)
+    if (!isTRUE(input$ex_forfait)) s <- filter(s, !forfait)
     s <- filter(s, is.na(datum) | (datum >= input$ex_datum[1] & datum <= input$ex_datum[2]))
     if (!isTRUE(all.equal(input$ex_bq, rng$bq)))
       s <- filter(s, !is.na(bq), bq >= input$ex_bq[1], bq <= input$ex_bq[2])
@@ -914,6 +919,21 @@ server <- function(input, output, session) {
         `Satz 3` = satz_txt(s3_fuer, s3_gegen), `Satz 4` = satz_txt(s4_fuer, s4_gegen),
         `Satz 5` = satz_txt(s5_fuer, s5_gegen),
         Ort = spielort)
+    } else if (input$ex_ansicht == "saetze") {
+      # Eine Zeile pro Team und Satz, Punkte als Zahlen (sortier- und filterbar)
+      s |>
+        select(datum, saison_lbl, gruppe, phase, team, heim_ausw, gegner, resultat,
+               matches("^s[1-5]_(fuer|gegen)$")) |>
+        tidyr::pivot_longer(matches("^s[1-5]_"), names_to = c("satz", ".value"),
+                            names_pattern = "s([1-5])_(fuer|gegen)") |>
+        filter(!is.na(fuer), !is.na(gegen)) |>
+        transmute(
+          Datum = datum, Saison = saison_lbl, Gruppe = gruppe, Phase = phase,
+          Team = team, `H/A` = ifelse(heim_ausw == "Heim", "H", "A"), Gegner = gegner,
+          Satz = as.integer(satz), `Pkt. Team` = fuer, `Pkt. Gegner` = gegen,
+          `Total` = fuer + gegen, Differenz = fuer - gegen,
+          `Gewonnen` = ifelse(fuer > gegen, "ja", "nein"),
+          Spielresultat = as.character(resultat))
     } else {
       pro_saison <- input$ex_ansicht == "saison"
       t <- team_tabelle(s, pro_saison = pro_saison) |>
@@ -933,23 +953,34 @@ server <- function(input, output, session) {
 
   output$ex_info <- renderText({
     s <- ex_gefiltert()
-    sprintf("%d Spiele gefiltert (%d Teamzeilen), Tabelle: %d Zeilen",
-            n_distinct(s$game_id), nrow(s), nrow(ex_anzeige()))
+    sprintf("%d Spiele gefiltert (%d Teamzeilen), Tabelle: %d Zeilen%s",
+            n_distinct(s$game_id), nrow(s), nrow(ex_anzeige()),
+            if (input$ex_ansicht == "saetze") " (Sätze, sortiert nach Total; Spaltenfilter oben für Punktbereiche)" else "")
   })
 
   output$ex_tabelle <- renderDT({
     d <- ex_anzeige()
     spiele_ansicht <- input$ex_ansicht == "spiele"
+    saetze_ansicht <- input$ex_ansicht == "saetze"
     quot <- which(names(d) %in% c("SQ", "BQ")) - 1          # 0-basierte Spaltenindizes
-    col_defs <- if (spiele_ansicht) list() else list(list(targets = quot, render = js_quotient))
+    col_defs <- if (spiele_ansicht || saetze_ansicht) list() else
+      list(list(targets = quot, render = js_quotient))
+    # Satz-Ansicht: standardmaessig die punktreichsten Saetze zuoberst
+    reihenfolge <- if (saetze_ansicht) list(list(which(names(d) == "Total") - 1, "desc")) else list()
     dt <- datatable(
       d, rownames = FALSE, filter = "top", extensions = "Buttons",
       options = list(
-        dom = "Bfrtip", pageLength = 25, scrollX = TRUE,
+        dom = "Bfrtip", pageLength = 25, scrollX = TRUE, order = reihenfolge,
         buttons = list(list(extend = "colvis", text = "Spalten ein-/ausblenden")),
         columnDefs = col_defs,
         language = list(url = "https://cdn.datatables.net/plug-ins/1.13.6/i18n/de-DE.json")
       ))
+    if (saetze_ansicht) {
+      return(dt |>
+        formatDate("Datum", method = "toLocaleDateString", params = list("de-CH")) |>
+        formatStyle("Gewonnen", color = styleEqual(c("ja", "nein"), c("#1B7F5A", "#C0392B"))) |>
+        formatStyle("Total", fontWeight = "bold"))
+    }
     if (spiele_ansicht) {
       dt |>
         formatDate("Datum", method = "toLocaleDateString", params = list("de-CH")) |>
